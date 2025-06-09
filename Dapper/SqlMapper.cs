@@ -17,6 +17,7 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Xml;
@@ -2000,67 +2001,99 @@ namespace Dapper
             }
         }
 
-        internal static Func<DbDataReader, object> GetDapperRowDeserializer(DbDataReader reader, int startBound, int length, bool returnNullIfFirstMissing)
-        {
-            var fieldCount = reader.FieldCount;
-            if (length == -1)
+    internal static Func<DbDataReader, object> GetDapperRowDeserializer(DbDataReader reader, int startBound, int length, bool returnNullIfFirstMissing)
+    {
+      var fieldCount = reader.FieldCount;
+      if (length == -1)
+      {
+        length = fieldCount - startBound;
+      }
+
+      if (fieldCount <= startBound)
+      {
+        throw MultiMapException(reader);
+      }
+
+      var effectiveFieldCount = Math.Min(fieldCount - startBound, length);
+
+      DapperTable? table = null;
+
+      // FORKED
+      // Precompute which columns are json/jsonb
+      var isJsonColumn = new bool[effectiveFieldCount];
+      for (int i = 0; i < effectiveFieldCount; i++)
+      {
+        var dataTypeName = reader.GetDataTypeName(i + startBound);
+        isJsonColumn[i] = string.Equals(dataTypeName, "json", StringComparison.OrdinalIgnoreCase)
+                       || string.Equals(dataTypeName, "jsonb", StringComparison.OrdinalIgnoreCase);
+      }
+
+      // FORKED END
+      return
+          r =>
+          {
+            if (table is null)
             {
-                length = fieldCount - startBound;
+              string[] names = new string[effectiveFieldCount];
+              for (int i = 0; i < effectiveFieldCount; i++)
+              {
+                names[i] = r.GetName(i + startBound);
+              }
+              table = new DapperTable(names);
             }
 
-            if (fieldCount <= startBound)
+            var values = new object?[effectiveFieldCount];
+
+            if (returnNullIfFirstMissing)
             {
-                throw MultiMapException(reader);
+              values[0] = r.GetValue(startBound);
+              if (values[0] is DBNull)
+              {
+                return null!;
+              }
             }
 
-            var effectiveFieldCount = Math.Min(fieldCount - startBound, length);
-
-            DapperTable? table = null;
-
-            return
-                r =>
+            if (startBound == 0)
+            {
+              for (int i = 0; i < values.Length; i++)
+              {
+                if (r.IsDBNull(i))
                 {
-                    if (table is null)
-                    {
-                        string[] names = new string[effectiveFieldCount];
-                        for (int i = 0; i < effectiveFieldCount; i++)
-                        {
-                            names[i] = r.GetName(i + startBound);
-                        }
-                        table = new DapperTable(names);
-                    }
-
-                    var values = new object[effectiveFieldCount];
-
-                    if (returnNullIfFirstMissing)
-                    {
-                        values[0] = r.GetValue(startBound);
-                        if (values[0] is DBNull)
-                        {
-                            return null!;
-                        }
-                    }
-
-                    if (startBound == 0)
-                    {
-                        for (int i = 0; i < values.Length; i++)
-                        {
-                            object val = r.GetValue(i);
-                            values[i] = val is DBNull ? null! : val;
-                        }
-                    }
-                    else
-                    {
-                        var begin = returnNullIfFirstMissing ? 1 : 0;
-                        for (var iter = begin; iter < effectiveFieldCount; ++iter)
-                        {
-                            object obj = r.GetValue(iter + startBound);
-                            values[iter] = obj is DBNull ? null! : obj;
-                        }
-                    }
-                    return new DapperRow(table, values);
-                };
-        }
+                    values[i] = null;
+                }
+                else if (isJsonColumn[i])
+                {
+                    // Parse to JsonDocument
+                    values[i] = r.GetFieldValue<JsonDocument>(i);
+                }
+                else
+                {
+                  values[i] = r.GetValue(i);
+                }
+              }
+            }
+            else
+            {
+              var begin = returnNullIfFirstMissing ? 1 : 0;
+              for (var iter = begin; iter < effectiveFieldCount; ++iter)
+              {
+                if (r.IsDBNull(iter + startBound))
+                {
+                    values[iter] = null;
+                }
+                else if (isJsonColumn[iter])
+                {
+                  values[iter] = r.GetFieldValue<JsonDocument>(iter + startBound);
+                }
+                else
+                {
+                    values[iter] = r.GetValue(iter + startBound);
+                }
+              }
+            }
+            return new DapperRow(table, values);
+          };
+    }
         /// <summary>
         /// Internal use only.
         /// </summary>
