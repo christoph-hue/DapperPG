@@ -1204,11 +1204,12 @@ namespace Dapper
 
             IDbCommand? cmd = null;
             DbDataReader? reader = null;
-
+            
             bool wasClosed = cnn.State == ConnectionState.Closed;
             try
             {
                 cmd = command.SetupCommand(cnn, info.ParamReader);
+                cmd.Prepare();
 
                 if (wasClosed) cnn.Open();
                 reader = ExecuteReaderWithFlagsFallback(cmd, wasClosed, CommandBehavior.SequentialAccess | CommandBehavior.SingleResult);
@@ -2060,11 +2061,8 @@ namespace Dapper
                 if (isJsonColumn[i])
                 {
                     values[i] = JsonDocument.Parse(r.GetFieldValue<ReadOnlyMemory<byte>>(i));
-                          continue;
-                //      } else if(isJsonColumn[i] == -1)
-                //{
-                //    values[i] = JsonDocument.Parse(r.GetFieldValue<ReadOnlyMemory<byte>>(i).Slice(1));
-                //          continue;
+                    continue;
+                
                 }
                 object val = r.GetValue(i);
                 if (val is DBNull)
@@ -2086,11 +2084,6 @@ namespace Dapper
                       {
                           values[iter] = JsonDocument.Parse(r.GetFieldValue<ReadOnlyMemory<byte>>(iter + startBound));
                           continue;
-                      //}
-                      //else if (isJsonColumn[iter] == -1)
-                      //{
-                      //    values[iter] = JsonDocument.Parse(r.GetFieldValue<ReadOnlyMemory<byte>>(iter + startBound).Slice(1));
-                      //    continue;
                       }
                       object obj = r.GetValue(iter + startBound);
                       if (obj is DBNull)

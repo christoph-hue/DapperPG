@@ -427,6 +427,7 @@ namespace Dapper
             bool wasClosed = cnn.State == ConnectionState.Closed;
             var cancel = command.CancellationToken;
             using var cmd = command.TrySetupAsyncCommand(cnn, info.ParamReader);
+            await cmd.PrepareAsync();
             DbDataReader? reader = null;
             try
             {
