@@ -2024,8 +2024,8 @@ namespace Dapper
       for (int i = 0; i < effectiveFieldCount; i++)
       {
         var dataTypeName = reader.GetDataTypeName(i + startBound);
-        isJsonColumn[i] = string.Equals(dataTypeName, "json", StringComparison.OrdinalIgnoreCase)
-                       || string.Equals(dataTypeName, "jsonb", StringComparison.OrdinalIgnoreCase);
+        isJsonColumn[i] = string.Equals(dataTypeName, "json", StringComparison.OrdinalIgnoreCase) || 
+                        string.Equals(dataTypeName, "jsonb", StringComparison.OrdinalIgnoreCase);
       }
 
       // FORKED END
@@ -2052,46 +2052,59 @@ namespace Dapper
                 return null!;
               }
             }
-
-            if (startBound == 0)
+              // FORKED
+              if (startBound == 0)
             {
               for (int i = 0; i < values.Length; i++)
               {
-                if (r.IsDBNull(i))
+                if (isJsonColumn[i])
                 {
-                    values[i] = null;
+                    values[i] = JsonDocument.Parse(r.GetFieldValue<ReadOnlyMemory<byte>>(i));
+                          continue;
+                //      } else if(isJsonColumn[i] == -1)
+                //{
+                //    values[i] = JsonDocument.Parse(r.GetFieldValue<ReadOnlyMemory<byte>>(i).Slice(1));
+                //          continue;
                 }
-                else if (isJsonColumn[i])
+                object val = r.GetValue(i);
+                if (val is DBNull)
                 {
-                    // Parse to JsonDocument
-                    values[i] = r.GetFieldValue<JsonDocument>(i);
+                    values[i] = null!;
                 }
                 else
                 {
-                  values[i] = r.GetValue(i);
+                    values[i] = val;
                 }
-              }
+                }
             }
             else
             {
               var begin = returnNullIfFirstMissing ? 1 : 0;
-              for (var iter = begin; iter < effectiveFieldCount; ++iter)
-              {
-                if (r.IsDBNull(iter + startBound))
-                {
-                    values[iter] = null;
-                }
-                else if (isJsonColumn[iter])
-                {
-                  values[iter] = r.GetFieldValue<JsonDocument>(iter + startBound);
-                }
-                else
-                {
-                    values[iter] = r.GetValue(iter + startBound);
-                }
+                  for (var iter = begin; iter < effectiveFieldCount; ++iter)
+                  {
+                      if (isJsonColumn[iter])
+                      {
+                          values[iter] = JsonDocument.Parse(r.GetFieldValue<ReadOnlyMemory<byte>>(iter + startBound));
+                          continue;
+                      //}
+                      //else if (isJsonColumn[iter] == -1)
+                      //{
+                      //    values[iter] = JsonDocument.Parse(r.GetFieldValue<ReadOnlyMemory<byte>>(iter + startBound).Slice(1));
+                      //    continue;
+                      }
+                      object obj = r.GetValue(iter + startBound);
+                      if (obj is DBNull)
+                      {
+                          values[iter] = null!;
+                      }
+                      else
+                      {
+                          values[iter] = obj;
+                      }
+                  }
+                  // FORKED END
               }
-            }
-            return new DapperRow(table, values);
+              return new DapperRow(table, values);
           };
     }
         /// <summary>
