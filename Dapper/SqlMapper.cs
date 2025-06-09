@@ -12,6 +12,7 @@ using System.Data.Common;
 using System.Data.SqlTypes;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -1209,6 +1210,7 @@ namespace Dapper
             try
             {
                 cmd = command.SetupCommand(cnn, info.ParamReader);
+                cmd.Prepare();
 
                 if (wasClosed) cnn.Open();
                 reader = ExecuteReaderWithFlagsFallback(cmd, wasClosed, CommandBehavior.SequentialAccess | CommandBehavior.SingleResult);
@@ -2020,12 +2022,12 @@ namespace Dapper
 
       // FORKED
       // Precompute which columns are json/jsonb
-      var isJsonColumn = new bool[effectiveFieldCount];
+      var isJsonColumn = new int[effectiveFieldCount];
       for (int i = 0; i < effectiveFieldCount; i++)
       {
         var dataTypeName = reader.GetDataTypeName(i + startBound);
-        isJsonColumn[i] = string.Equals(dataTypeName, "json", StringComparison.OrdinalIgnoreCase) || 
-                        string.Equals(dataTypeName, "jsonb", StringComparison.OrdinalIgnoreCase);
+        isJsonColumn[i] = string.Equals(dataTypeName, "json", StringComparison.OrdinalIgnoreCase) ? 1 : 
+                        string.Equals(dataTypeName, "jsonb", StringComparison.OrdinalIgnoreCase) ? -1 : 0;
       }
 
       // FORKED END
@@ -2057,15 +2059,20 @@ namespace Dapper
             {
               for (int i = 0; i < values.Length; i++)
               {
-                if (isJsonColumn[i])
+                if (isJsonColumn[i] == 1)
                 {
-                    values[i] = JsonDocument.Parse(r.GetFieldValue<ReadOnlyMemory<byte>>(i));
+                          //values[i] = JsonDocument.Parse(r.GetFieldValue<ReadOnlyMemory<byte>>(i));
+
+                          values[i] = JsonDocument.Parse(r.GetStream(i));
                           continue;
-                //      } else if(isJsonColumn[i] == -1)
-                //{
-                //    values[i] = JsonDocument.Parse(r.GetFieldValue<ReadOnlyMemory<byte>>(i).Slice(1));
-                //          continue;
-                }
+                      }
+                      else if (isJsonColumn[i] == -1)
+                      {
+                          var stream = r.GetStream(i);
+                          _ = stream.ReadByte();
+                          values[i] = JsonDocument.Parse(stream);
+                          continue;
+                      }
                 object val = r.GetValue(i);
                 if (val is DBNull)
                 {

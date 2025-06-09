@@ -136,6 +136,7 @@ namespace Dapper
             }
             cmd.CommandType = CommandTypeDirect;
             paramReader?.Invoke(cmd, Parameters);
+            
             return cmd;
         }
 
